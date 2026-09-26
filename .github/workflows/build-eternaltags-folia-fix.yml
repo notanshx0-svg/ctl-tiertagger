@@ -54,25 +54,8 @@ jobs:
           )
           replace(
               plugin_menu,
-              """    public final void sync(Runnable runnable) {
-              EternalTags.getInstance().getScheduler().runTask(runnable);
-          }
-          """,
-              """    public final void sync(Runnable runnable) {
-              EternalTags.getInstance().getScheduler().runTask(runnable);
-          }
-
-          /**
-           * Run a task on the owning scheduler for a player.
-           * Required by Folia/Canvas for inventory and other entity-bound operations.
-           *
-           * @param player The player whose scheduler should own the task
-           * @param runnable The task to run
-           */
-          public final void entitySync(Player player, Runnable runnable) {
-              EternalTags.getInstance().getScheduler().runTaskAtEntity(player, runnable);
-          }
-          """,
+              "        EternalTags.getInstance().getScheduler().runTask(runnable);\n    }",
+              "        EternalTags.getInstance().getScheduler().runTask(runnable);\n    }\n\n    /**\n     * Run a task on the owning scheduler for a player.\n     * Required by Folia/Canvas for inventory and other entity-bound operations.\n     *\n     * @param player The player whose scheduler should own the task\n     * @param runnable The task to run\n     */\n    public final void entitySync(Player player, Runnable runnable) {\n        EternalTags.getInstance().getScheduler().runTaskAtEntity(player, runnable);\n    }",
               1
           )
           replace(
