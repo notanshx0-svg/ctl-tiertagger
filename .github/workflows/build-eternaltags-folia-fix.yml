@@ -23,18 +23,119 @@ jobs:
           distribution: temurin
           java-version: '25'
 
-      - name: Apply Folia entity scheduler fix
+      - name: Apply complete Folia GUI fix
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p = Path("src/main/java/xyz/oribuin/eternaltags/gui/PluginMenu.java")
-          s = p.read_text()
-          old = "EternalTags.getInstance().getScheduler().runTask(player::closeInventory);"
-          new = "EternalTags.getInstance().getScheduler().runTaskAtEntity(player, player::closeInventory);"
-          if old not in s:
-              raise SystemExit("target line not found")
-          p.write_text(s.replace(old, new))
+
+          def replace(path, old, new, count=None):
+              p = Path(path)
+              s = p.read_text()
+              found = s.count(old)
+              if found == 0:
+                  raise SystemExit(f"target not found in {path}: {old!r}")
+              if count is not None and found != count:
+                  raise SystemExit(f"expected {count} occurrence(s) in {path}, found {found}: {old!r}")
+              p.write_text(s.replace(old, new))
+
+          plugin_menu = "src/main/java/xyz/oribuin/eternaltags/gui/PluginMenu.java"
+          replace(
+              plugin_menu,
+              "this.sync(() -> MenuProvider.get(TagsGUI.class).open(event.getPlayer(), tag -> tag.getId().contains(message) || tag.getName().contains(message)",
+              "this.entitySync(event.getPlayer(), () -> MenuProvider.get(TagsGUI.class).open(event.getPlayer(), tag -> tag.getId().contains(message) || tag.getName().contains(message)",
+              1
+          )
+          replace(
+              plugin_menu,
+              "EternalTags.getInstance().getScheduler().runTask(player::closeInventory);",
+              "EternalTags.getInstance().getScheduler().runTaskAtEntity(player, player::closeInventory);",
+              1
+          )
+          replace(
+              plugin_menu,
+              """    public final void sync(Runnable runnable) {
+              EternalTags.getInstance().getScheduler().runTask(runnable);
+          }
+          """,
+              """    public final void sync(Runnable runnable) {
+              EternalTags.getInstance().getScheduler().runTask(runnable);
+          }
+
+          /**
+           * Run a task on the owning scheduler for a player.
+           * Required by Folia/Canvas for inventory and other entity-bound operations.
+           *
+           * @param player The player whose scheduler should own the task
+           * @param runnable The task to run
+           */
+          public final void entitySync(Player player, Runnable runnable) {
+              EternalTags.getInstance().getScheduler().runTaskAtEntity(player, runnable);
+          }
+          """,
+              1
+          )
+          replace(
+              plugin_menu,
+              'return this.config.getBoolean("gui-settings.add-pages-asynchronously", true);',
+              'return !TagsUtils.isFolia() && this.config.getBoolean("gui-settings.add-pages-asynchronously", true);',
+              1
+          )
+
+          for path in [
+              "src/main/java/xyz/oribuin/eternaltags/gui/menu/TagsGUI.java",
+              "src/main/java/xyz/oribuin/eternaltags/gui/menu/FavouritesGUI.java",
+              "src/main/java/xyz/oribuin/eternaltags/gui/menu/CategoryGUI.java",
+          ]:
+              p = Path(path)
+              s = p.read_text()
+              s = s.replace(
+                  "this.sync(() -> gui.updateTitle(",
+                  "this.entitySync(player, () -> gui.updateTitle("
+              )
+              p.write_text(s)
+
+          replace(
+              "src/main/java/xyz/oribuin/eternaltags/gui/menu/TagsGUI.java",
+              "this.sync(() -> gui.open(player));",
+              "this.entitySync(player, () -> gui.open(player));",
+              1
+          )
+
+          for path in [
+              "src/main/java/xyz/oribuin/eternaltags/gui/menu/FavouritesGUI.java",
+              "src/main/java/xyz/oribuin/eternaltags/gui/menu/CategoryGUI.java",
+          ]:
+              replace(
+                  path,
+                  "        gui.open(player);",
+                  "        this.entitySync(player, () -> gui.open(player));",
+                  1
+              )
+
+          close_action = Path("src/main/java/xyz/oribuin/eternaltags/action/CloseAction.java")
+          s = close_action.read_text()
+          if "import xyz.oribuin.eternaltags.EternalTags;" not in s:
+              s = s.replace(
+                  "import org.jetbrains.annotations.NotNull;\n",
+                  "import org.jetbrains.annotations.NotNull;\nimport xyz.oribuin.eternaltags.EternalTags;\n"
+              )
+          s = s.replace(
+              "        player.closeInventory();",
+              "        EternalTags.getInstance().getScheduler().runTaskAtEntity(player, player::closeInventory);"
+          )
+          close_action.write_text(s)
+
+          # Verify no known player GUI operation still uses the generic global sync helper.
+          for path in [
+              plugin_menu,
+              "src/main/java/xyz/oribuin/eternaltags/gui/menu/TagsGUI.java",
+              "src/main/java/xyz/oribuin/eternaltags/gui/menu/FavouritesGUI.java",
+              "src/main/java/xyz/oribuin/eternaltags/gui/menu/CategoryGUI.java",
+          ]:
+              s = Path(path).read_text()
+              if "this.sync(() -> gui." in s:
+                  raise SystemExit(f"unsafe gui sync remains in {path}")
           PY
 
       - name: Build
@@ -46,6 +147,6 @@ jobs:
       - name: Upload patched jar
         uses: actions/upload-artifact@v4
         with:
-          name: EternalTags-1.3.5-FoliaFix
+          name: EternalTags-1.3.5-FoliaFix-v2
           path: build/libs/EternalTags-1.3.5.jar
           if-no-files-found: error
